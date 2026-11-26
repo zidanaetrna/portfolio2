@@ -1,0 +1,67 @@
+# Workflow: build web statis, lalu deploy ke Netlify.
+#
+# - Push ke main          -> build + deploy ke Netlify (production)
+# - Pull request ke main  -> build doang (ngecek kodenya masih bisa di-build)
+# - Tombol "Run workflow" -> build + deploy manual
+#
+# Butuh 2 secret di repo (Settings -> Secrets and variables -> Actions):
+#   NETLIFY_AUTH_TOKEN  = Personal access token dari Netlify
+#   NETLIFY_SITE_ID     = Project ID / Site ID dari Netlify
+
+name: Deploy ke Netlify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Push 2x cepet-cepetan? Yang lama dibatalin, yang jalan cuma yang terbaru.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      # Folder hasil build. Vite = dist, Create React App = build, Next.js export = out
+      PUBLISH_DIR: dist
+
+    steps:
+      - name: Ambil kode dari repo
+        uses: actions/checkout@v5
+
+      - name: Siapin Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Install dependency
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy ke Netlify
+        if: github.event_name != 'pull_request'
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          if [ -z "$NETLIFY_AUTH_TOKEN" ] || [ -z "$NETLIFY_SITE_ID" ]; then
+            echo "::error::Secret NETLIFY_AUTH_TOKEN atau NETLIFY_SITE_ID belum diisi di Settings -> Secrets and variables -> Actions"
+            exit 1
+          fi
+          if [ ! -d "$PUBLISH_DIR" ]; then
+            echo "::error::Folder '$PUBLISH_DIR' nggak ada setelah build. Ganti PUBLISH_DIR di deploy.yml sesuai folder hasil build kalian."
+            exit 1
+          fi
+          npx -y netlify-cli deploy --dir="$PUBLISH_DIR" --prod
